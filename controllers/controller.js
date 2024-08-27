@@ -1,6 +1,8 @@
 const { Issuer, generators } = require('openid-client')
+const axios = require('axios')
 const model = require('../model/model')
 const jwt = require('jsonwebtoken')
+const keys = require('../config/keys')
 
 let googleClient;
 
@@ -56,32 +58,103 @@ exports.callback = async (req, res) => {
 exports.token = async (req, res) => {
     
     const refreshToken = req.cookies.APP_REFRESH_TOKEN;
+    //const refreshToken = "L7QVEucyEj_oDTJ0JNU0lS_0zoaOywKNaEv_egC3J7I";
     if (!refreshToken) return res.status(401).send("Unauthorized")
 
-    const result = await model.get_user_id(refreshToken);
+    const result = await model.get_user_by_refreshToken(refreshToken);
     if (result.rows.length === 0) return res.status(401).send("Unauthorized");
+
+    if (new Date() > new Date(result.rows[0].expiry)) return res.status(401).send('Unauthorized');
+
+    const client = await getGoogleAuthClient();
+    //console.log("this is results : "+ JSON.stringify(result.rows))
+    //console.log("this is google access toekn : "+ result.rows[0].google_access_token)
+
+    const is_token_valid = await validateGoogleAccessToken(result.rows[0].google_access_token);
+    console.log("this is google : " + is_token_valid)
+
+    if (!is_token_valid) {
+        const new_token_set = await generateGoogleAccessToken(result.rows[0].google_refresh_token);
+
+        if (new_token_set) {
+            model.update_user_token_table(new_token_set.access_token, result.rows[0].user_id)
+            console.log("\n\n\nexecute ......................\n\n\n")
+        }else{
+            return res.status(401).send("Unauthorized");  
+        }
+    }
 
     const userDetails = await model.get_user_details(result.rows[0].user_id)
 
     const user = {
         username : userDetails.rows[0].username,
         email : userDetails.rows[0].email,
+        sub: userDetails.rows[0].id
     }
 
-    const token = jwt.sign(user, process.env.JWT_SECRET, {expiresIn: '1h'});
+    const key = await keys.get_key();
+
+    const token = jwt.sign(user, key.private_key, { algorithm: 'RS256' ,expiresIn: '1h'});
 
     res.json({ token })
     
 }
 
-exports.api_middleware = (req, res, next) => {
+generateGoogleAccessToken = async (refresh_token) => {
+
+    try {
+        const response = await axios.post('https://oauth2.googleapis.com/token', null, {
+            params: {
+                client_id: process.env.GOOGLE_CLIENT_ID,
+                client_secret: process.env.GOOGLE_CLIENT_SECRET,
+                refresh_token: refresh_token,
+                grant_type: 'refresh_token',
+            }
+        });
+
+        if (response.status === 200) {
+            console.log("Google access token refreshed successfully.");
+            console.log("this is token : "+ JSON.stringify(response.data))
+            return response.data;
+        }
+    } catch (error) {
+        console.log("Failed to refresh Google access token.");
+        return null;
+    }
+    return null;
+}
+
+validateGoogleAccessToken = async (access_token) => {
+    try {
+
+        const response = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo',{
+            headers: {
+                authorization: `Bearer ${access_token}`
+            }
+        });
+
+        if (response.status === 200) {
+            //console.log("token is valid")
+            return true;
+        }
+
+    } catch (error) {
+        //console.log("Token is invalid")
+        return false;
+    }
+    return false;
+}
+
+exports.api_middleware = async (req, res, next) => {
 
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) return res.status(401).send("Unauthorized");
 
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    const key = await keys.get_key();
+
+    jwt.verify(token, key.public_key, { algorithms: ['RS256']},(err, user) => {
         if (err) return res.status(401).send("Unauthorized");
 
         req.user = user;
@@ -91,9 +164,9 @@ exports.api_middleware = (req, res, next) => {
 
 exports.users = async (req, res) => {
 
-    res.json({data: "This is secured end point",
-        name: req.user.username
-    })
+    const users = await model.get_users(req.user.sub);
+    res.json(users.rows);
+    console.log("\n\n\n id : "+ req.user.sub)
 }
 
 getGoogleAuthClient = async () => {
@@ -111,3 +184,9 @@ getGoogleAuthClient = async () => {
         return googleClient;
     }
 }
+
+// exports.sign = async (req, res) => {
+//     const { private_key} = await keys.get_key();
+//     res.send(private_key)
+
+// }

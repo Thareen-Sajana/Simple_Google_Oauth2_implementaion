@@ -10,4 +10,6 @@ router.get('/token', controller.token);
 
 router.get('/api/users', controller.api_middleware, controller.users);
 
+// router.get('/hi', controller.sign)
+
 module.exports = router;
