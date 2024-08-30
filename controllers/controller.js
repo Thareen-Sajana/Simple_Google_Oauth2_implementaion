@@ -100,65 +100,16 @@ exports.token = async (req, res) => {
     
 }
 
-generateGoogleAccessToken = async (refresh_token) => {
-
-    try {
-        const response = await axios.post('https://oauth2.googleapis.com/token', null, {
-            params: {
-                client_id: process.env.GOOGLE_CLIENT_ID,
-                client_secret: process.env.GOOGLE_CLIENT_SECRET,
-                refresh_token: refresh_token,
-                grant_type: 'refresh_token',
-            }
-        });
-
-        if (response.status === 200) {
-            console.log("Google access token refreshed successfully.");
-            console.log("this is token : "+ JSON.stringify(response.data))
-            return response.data;
-        }
-    } catch (error) {
-        console.log("Failed to refresh Google access token.");
-        return null;
-    }
-    return null;
-}
-
-validateGoogleAccessToken = async (access_token) => {
-    try {
-
-        const response = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo',{
-            headers: {
-                authorization: `Bearer ${access_token}`
-            }
-        });
-
-        if (response.status === 200) {
-            return true;
-        }
-
-    } catch (error) {
-        return false;
-    }
-    return false;
-}
-
-exports.api_middleware = async (req, res, next) => {
-
-    const verifyToken = util.promisify(jwt.verify);
+exports.api_middleware = (req, res, next) => {
 
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) return res.status(401).send("Unauthorized");
 
-    
+    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+        if (err) return res.status(401).send("Unauthorized");
 
-    try {
-
-        const key = await keys.get_key();
-
-        const user = jwt.verify(token, key.public_key, { algorithms: ['RS256']});
         req.user = user;
         next();
 
