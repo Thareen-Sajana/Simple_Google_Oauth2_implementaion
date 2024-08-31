@@ -31,3 +31,24 @@ exports.get_user_by_refreshToken = (refreshToken) => {
 exports.get_user_details = (user_id) => {
     return db.query('SELECT * FROM users WHERE id = $1', [user_id]);
 }
+
+exports.get_users = async (user_id) => {
+
+    await db.query(`SET LOCAL app.user_id = ${user_id}`);
+    return await db.query('SELECT id, username, email FROM users WHERE id=$1', [user_id]);
+}
+
+exports.update_user_token_table = async (newToken, id) => {
+    await db.query(
+        'UPDATE user_token SET google_access_token = $1 WHERE user_id = $2',
+        [newToken, id]
+    );
+}
+
+exports.add_sign_keys = async (privateKey, publicKey, expirationTime) => {
+    await db.query('INSERT INTO signing_key (private_key, public_key, expires_at) VALUES ($1, $2, $3)', [privateKey, publicKey, expirationTime]);
+}
+
+exports.get_sign_keys = async () => {
+    return await db.query('SELECT * FROM signing_key WHERE expires_at > NOW() ORDER BY expires_at DESC LIMIT 1');
+}

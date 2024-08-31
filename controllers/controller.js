@@ -100,16 +100,41 @@ exports.token = async (req, res) => {
     
 }
 
-exports.api_middleware = (req, res, next) => {
+validateGoogleAccessToken = async (access_token) => {
+    try {
+
+        const response = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo',{
+            headers: {
+                authorization: `Bearer ${access_token}`
+            }
+        });
+
+        if (response.status === 200) {
+            //console.log("token is valid")
+            return true;
+        }
+
+    } catch (error) {
+        //console.log("Token is invalid")
+        return false;
+    }
+    return false;
+}
+
+exports.api_middleware = async (req, res, next) => {
+
+    const verifyToken = util.promisify(jwt.verify);
 
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) return res.status(401).send("Unauthorized");
 
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-        if (err) return res.status(401).send("Unauthorized");
+    try {
 
+        const key = await keys.get_key();
+
+        const user = await verifyToken(token, key.public_key, { algorithms: ['RS256']});
         req.user = user;
         next();
 
